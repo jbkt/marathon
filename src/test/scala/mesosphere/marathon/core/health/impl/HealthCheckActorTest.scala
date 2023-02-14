@@ -63,7 +63,7 @@ class HealthCheckActorTest extends AkkaUnitTest {
         new HealthCheckActor(app, appHealthCheckActor.ref, killService, healthCheck, instanceTracker, system.eventStream, healthCheckWorkerHub, healthCheckShieldApi, antiSnowballApi) {
           instances.map(instance => {
             val taskId = instance.appTask.taskId
-            healthByTaskId += (taskId -> Health(instance.instanceId)
+            healthIndex += (taskId -> Health(instance.instanceId)
               .update(Healthy(instance.instanceId, taskId, instance.runSpecVersion)))
           })
         }
