@@ -242,6 +242,7 @@ private[health] class HealthCheckActor(
   def updateInstanceHealth(instanceHealth: InstanceHealth): Unit = {
     val result = instanceHealth.result
     val instanceId = result.instanceId
+    val taskId = result.taskId
     val health = instanceHealth.health
     val newHealth = instanceHealth.newHealth
 
@@ -252,9 +253,7 @@ private[health] class HealthCheckActor(
     // dead task (in addition to the living one), thus sometimes leading
     // Marathon to report the task / instance / app as unhealthy while
     // everything is running correctly.
-    val healthOfInstanceId = healthByTaskId.find(_._1.instanceId == instanceId)
-    if (healthOfInstanceId.isDefined)
-      healthByTaskId.remove(healthOfInstanceId.get._1)
+    healthByTaskId.remove(taskId)
 
     healthByTaskId += (result.taskId -> instanceHealth.newHealth)
     appHealthCheckActor ! HealthCheckStatusChanged(ApplicationKey(app.id, app.version), healthCheck, newHealth)
