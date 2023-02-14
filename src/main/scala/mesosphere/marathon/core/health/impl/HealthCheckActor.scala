@@ -17,7 +17,6 @@ import mesosphere.marathon.core.task.termination.{KillReason, KillService}
 import mesosphere.marathon.core.task.tracker.InstanceTracker
 import mesosphere.marathon.state.{AppDefinition, Timestamp}
 
-import scala.collection.concurrent.TrieMap
 import scala.concurrent.Future
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
@@ -37,7 +36,7 @@ private[health] class HealthCheckActor(
   implicit val mat = ActorMaterializer()
   import context.dispatcher
 
-  val healthByTaskId = TrieMap.empty[Task.Id, Health]
+  val healthIndex: HealthIndex = HealthDualTrieMap()
   var killingInFlight = Set.empty[Task.Id]
 
   private case class HealthCheckStreamStopped(thisInstance: this.type)
@@ -86,7 +85,7 @@ private[health] class HealthCheckActor(
     logger.debug(s"Purging health status of inactive instances for app ${app.id} version ${app.version} and healthCheck ${healthCheck}")
 
     val activeTaskIds: Set[Task.Id] = getActiveTaskForInstances(instances)
-    healthByTaskId.retain((taskId, health) => activeTaskIds(taskId))
+    healthIndex.retain(taskId => activeTaskIds(taskId))
     // FIXME: I discovered this is unsafe since killingInFlight might be used in 2 concurrent threads (see preStart method above)
     killingInFlight &= activeTaskIds
     logger.info(s"[anti-snowball] app ${app.id} version ${app.version} currently ${killingInFlight.size} instances killingInFlight")
@@ -171,7 +170,7 @@ private[health] class HealthCheckActor(
 
   /** Check if HealthCheckActor manages enough instances to decide whether it can kill one or if it needs info from AppHealthCheckActor */
   def needInfoFromAppHealthCheckActor(activeTaskIds: Set[Task.Id]): Boolean = {
-    val managedInstances = healthByTaskId.filterKeys(activeTaskIds)
+    val managedInstances = healthIndex.filterKeys(activeTaskIds)
     val enoughInstancesRunning = activeTaskIds.size >= app.instances * app.upgradeStrategy.minimumHealthCapacity
     val enoughManagedInstances = managedInstances.size >= 1 + (activeTaskIds.size * app.upgradeStrategy.minimumHealthCapacity).toInt
     enoughInstancesRunning && !enoughManagedInstances
@@ -179,7 +178,7 @@ private[health] class HealthCheckActor(
 
   /** Check if enough active and ready instances will remain if we kill 1 unhealthy instance */
   def checkEnoughInstancesRunning(unhealthyInstance: Instance, activeTaskIds: Set[Task.Id]): Boolean = {
-    val healthyInstances = healthByTaskId.filterKeys(activeTaskIds)
+    val healthyInstances = healthIndex.filterKeys(activeTaskIds)
       .filterKeys(taskId => !killingInFlight(taskId))
 
     logger.info(s"[anti-snowball] app ${app.id} version ${app.version} currently ${killingInFlight.size} instances killingInFlight")
@@ -204,7 +203,7 @@ private[health] class HealthCheckActor(
 
   def handleHealthResult(result: HealthResult): Unit = {
     val instanceId = result.instanceId
-    val health = healthByTaskId.getOrElse(result.taskId, Health(instanceId))
+    val health = healthIndex.getOrElse(result.taskId, Health(instanceId))
 
     val updatedHealth = result match {
       case Healthy(_, _, _, _, _) =>
@@ -242,6 +241,7 @@ private[health] class HealthCheckActor(
   def updateInstanceHealth(instanceHealth: InstanceHealth): Unit = {
     val result = instanceHealth.result
     val instanceId = result.instanceId
+    val taskId = result.taskId
     val health = instanceHealth.health
     val newHealth = instanceHealth.newHealth
 
@@ -252,11 +252,9 @@ private[health] class HealthCheckActor(
     // dead task (in addition to the living one), thus sometimes leading
     // Marathon to report the task / instance / app as unhealthy while
     // everything is running correctly.
-    val healthOfInstanceId = healthByTaskId.find(_._1.instanceId == instanceId)
-    if (healthOfInstanceId.isDefined)
-      healthByTaskId.remove(healthOfInstanceId.get._1)
+    healthIndex.remove(taskId)
 
-    healthByTaskId += (result.taskId -> instanceHealth.newHealth)
+    healthIndex += (result.taskId -> instanceHealth.newHealth)
     appHealthCheckActor ! HealthCheckStatusChanged(ApplicationKey(app.id, app.version), healthCheck, newHealth)
 
     if (health.alive != newHealth.alive && result.publishEvent) {
@@ -277,11 +275,10 @@ private[health] class HealthCheckActor(
 
   def receive: Receive = {
     case GetInstanceHealth(instanceId) =>
-      sender() ! healthByTaskId.find(_._1.instanceId == instanceId)
-        .map(_._2).getOrElse(Health(instanceId))
+      sender() ! healthIndex.get(instanceId).getOrElse(Health(instanceId))
 
     case GetAppHealth =>
-      sender() ! AppHealth(healthByTaskId.values.to[Seq])
+      sender() ! AppHealth(healthIndex.values.to[Seq])
 
     case result: HealthResult if result.version == app.version =>
       handleHealthResult(result)
