@@ -44,7 +44,7 @@ case class HealthSingleTrieMap() extends HealthIndex {
 
   /** Slow */
   def retain(p: Task.Id => Boolean): this.type = {
-    healthByTaskId.retain((takId, _) =>  p(takId))
+    healthByTaskId.retain((taskId, _) =>  p(taskId))
     this
   }
 
