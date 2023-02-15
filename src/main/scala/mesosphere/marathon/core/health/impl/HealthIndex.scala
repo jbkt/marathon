@@ -56,7 +56,7 @@ case class HealthSingleTrieMap() extends HealthIndex {
   def values: Iterable[Health] = healthByTaskId.values
 }
 
-/** New implementation, search by Instance.Id is dast but we need two indexes */
+/** New implementation, search by Instance.Id is fast but we need two indexes */
 case class HealthDualTrieMap() extends HealthIndex {
   val healthByTaskId: TrieMap[Task.Id, Health] = TrieMap.empty[Task.Id, Health]
   val healthByInstanceId: TrieMap[Instance.Id, Health] = TrieMap.empty[Instance.Id, Health]
