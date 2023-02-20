@@ -44,7 +44,7 @@ case class HealthSingleTrieMap() extends HealthIndex {
 
   /** Slow */
   def retain(p: Task.Id => Boolean): this.type = {
-    healthByTaskId.retain((taskId, _) =>  p(taskId))
+    healthByTaskId.retain((taskId, _) => p(taskId))
     this
   }
 
@@ -92,7 +92,7 @@ case class HealthDualTrieMap() extends HealthIndex {
     case (taskId: Task.Id, health: Health) =>
       healthByTaskId += kv
       healthByInstanceId += (taskId.instanceId, health)
-    this
+      this
   }
 
   def values: Iterable[Health] = healthByTaskId.values
