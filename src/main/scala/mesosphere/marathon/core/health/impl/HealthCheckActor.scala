@@ -253,7 +253,8 @@ private[health] class HealthCheckActor(
     // dead task (in addition to the living one), thus sometimes leading
     // Marathon to report the task / instance / app as unhealthy while
     // everything is running correctly.
-    healthByTaskId.remove(taskId)
+    val healthToRemove = healthByTaskId.get(taskId)
+    healthToRemove.filter(h => h.instanceId == instanceId).foreach(_ => healthByTaskId.remove(taskId))
 
     healthByTaskId += (result.taskId -> instanceHealth.newHealth)
     appHealthCheckActor ! HealthCheckStatusChanged(ApplicationKey(app.id, app.version), healthCheck, newHealth)
