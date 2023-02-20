@@ -25,9 +25,11 @@ trait HealthIndex {
   def retain(p: Task.Id => Boolean): this.type
 }
 
-/** Old implementation, search by Instance.Id is slow */
+/**
+  * Old implementation, search by Instance.Id is slow, kept for reference and for tests.
+  */
 case class HealthSingleTrieMap() extends HealthIndex {
-  val healthByTaskId: TrieMap[Task.Id, Health] = TrieMap.empty[Task.Id, Health]
+  private val healthByTaskId: TrieMap[Task.Id, Health] = TrieMap.empty[Task.Id, Health]
 
   def remove(key: Instance.Id): Unit = get(key).foreach(h => remove(h.instanceId))
 
@@ -56,20 +58,26 @@ case class HealthSingleTrieMap() extends HealthIndex {
   def values: Iterable[Health] = healthByTaskId.values
 }
 
-/** New implementation, search by Instance.Id is fast but we need two indexes */
+/**
+  * New implementation, search by Instance.Id is fast but we need two indexes.
+  */
 case class HealthDualTrieMap() extends HealthIndex {
-  val healthByTaskId: TrieMap[Task.Id, Health] = TrieMap.empty[Task.Id, Health]
-  val healthByInstanceId: TrieMap[Instance.Id, Health] = TrieMap.empty[Instance.Id, Health]
+  private val healthByTaskId: TrieMap[Task.Id, Health] = TrieMap.empty[Task.Id, Health]
+  private val taskIdByInstanceId: TrieMap[Instance.Id, Task.Id] = TrieMap.empty[Instance.Id, Task.Id]
 
-  def remove(key: Instance.Id): Unit = get(key).foreach(h => remove(h.instanceId))
+
+  def remove(key: Instance.Id): Unit = {
+    val maybeTaskId = taskIdByInstanceId.remove(key)
+    maybeTaskId.foreach(t => healthByTaskId.remove(t))
+  }
 
   def remove(key: Task.Id): Unit = {
     healthByTaskId.remove(key)
-    healthByInstanceId.remove(key.instanceId)
+    taskIdByInstanceId.remove(key.instanceId)
   }
 
   /** Fast O(log(n)) */
-  def get(key: Instance.Id): Option[Health] = healthByInstanceId.get(key)
+  def get(key: Instance.Id): Option[Health] = taskIdByInstanceId.get(key).flatMap(t=>healthByTaskId.get(t))
 
   def getOrElse(key: Task.Id, default: => Health): Health = healthByTaskId.getOrElse(key, default)
 
@@ -83,7 +91,7 @@ case class HealthDualTrieMap() extends HealthIndex {
     healthByTaskId.retain((taskId, _) => p(taskId))
     if (healthByTaskId.size < oldSize) {
       val retainedInstanceIds = healthByTaskId.keySet.map(_.instanceId)
-      healthByInstanceId.retain((instanceId, _) => retainedInstanceIds.contains(instanceId))
+      taskIdByInstanceId.retain((instanceId, _) => retainedInstanceIds.contains(instanceId))
     }
     this
   }
@@ -91,7 +99,7 @@ case class HealthDualTrieMap() extends HealthIndex {
   def +=(kv: (Task.Id, Health)): this.type = {
     case (taskId: Task.Id, health: Health) =>
       healthByTaskId += kv
-      healthByInstanceId += (taskId.instanceId, health)
+      taskIdByInstanceId += (taskId.instanceId, taskId)
       this
   }
 
